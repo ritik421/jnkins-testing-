@@ -10,7 +10,7 @@ pipeline {
 
         stage('Setup Python') {
             steps {
-                sh '''
+                sh '''#!/bin/bash
                 set -euo pipefail
                 export PATH="$HOME/.local/bin:$PATH"
                 poetry env use /usr/local/bin/python3.10
@@ -20,7 +20,7 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                sh '''
+                sh '''#!/bin/bash
                 set -euo pipefail
                 poetry install --no-interaction --no-root
                 poetry run pip install pytest-html
@@ -30,7 +30,7 @@ pipeline {
 
         stage('Prepare Reports Directory') {
             steps {
-                sh '''
+                sh '''#!/bin/bash
                 set -euo pipefail
                 REPORT_DIR="reports/${BUILD_NUMBER}_feather"
                 mkdir -p "$REPORT_DIR"
@@ -40,7 +40,7 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                sh '''
+                sh '''#!/bin/bash
                 set -euo pipefail
                 cd ${WORKSPACE}
                 export PYTHONPATH="${PYTHONPATH:-}:.:$(pwd)/nexus"
