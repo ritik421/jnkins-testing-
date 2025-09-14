@@ -2,9 +2,17 @@ pipeline {
     agent { label 'Worker-1' }
 
     stages {
-        stage('Checkout') {
+        stage('Checkout Jenkinsfile Repo') {
             steps {
                 checkout scm
+            }
+        }
+
+        stage('Checkout Feathers Repo') {
+            steps {
+                git branch: 'bpt/stage',
+                    url: 'https://github.com/attentive-fx/feathers',
+                    credentialsId: 'd8025270-629b-4058-8293-9b8d4cc40022'
             }
         }
 
