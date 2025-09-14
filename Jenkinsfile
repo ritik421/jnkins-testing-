@@ -1,96 +1,71 @@
 pipeline {
     agent { label 'Worker-1' }
 
-    triggers {
-        // Requires webhook on original repo
-        githubPullRequest()
-    }
-
-    options {
-        timestamps()
-        ansiColor('xterm')
-    }
-
     stages {
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
-                git branch: "${env.CHANGE_BRANCH ?: env.BRANCH_NAME}",
-                    url: 'https://github.com/attentive-fx/feathers',
-                    credentialsId: 'd8025270-629b-4058-8293-9b8d4cc40022'
+                checkout scm
             }
         }
 
-        stage('Verify Branch') {
-            when {
-                not {
-                    anyOf {
-                        branch 'bpt/stage'
-                        branch 'bpt/master'
-                    }
-                }
-            }
-            steps {
-                echo "Skipping build because branch is not bpt/stage or bpt/master"
-                script { currentBuild.result = 'SUCCESS' }
-            }
-        }
-
-        stage('Setup Environment') {
-            when {
-                anyOf {
-                    branch 'bpt/stage'
-                    branch 'bpt/master'
-                }
-            }
+        stage('Setup Python') {
             steps {
                 sh '''
                 set -euo pipefail
                 export PATH="$HOME/.local/bin:$PATH"
                 poetry env use /usr/local/bin/python3.10
+                '''
+            }
+        }
 
-                echo "Installing dependencies..."
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                set -euo pipefail
                 poetry install --no-interaction --no-root
-
-                # Ensure pytest-html is installed
                 poetry run pip install pytest-html
                 '''
             }
         }
 
-        stage('Run Tests') {
-            when {
-                anyOf {
-                    branch 'bpt/stage'
-                    branch 'bpt/master'
-                }
-            }
+        stage('Prepare Reports Directory') {
             steps {
                 sh '''
+                set -euo pipefail
                 REPORT_DIR="reports/${BUILD_NUMBER}_feather"
                 mkdir -p "$REPORT_DIR"
+                '''
+            }
+        }
 
+        stage('Run Tests') {
+            steps {
+                sh '''
+                set -euo pipefail
                 cd ${WORKSPACE}
-
                 export PYTHONPATH="${PYTHONPATH:-}:.:$(pwd)/nexus"
                 export DJANGO_SETTINGS_MODULE=nexus.settings
 
-                echo "Running pytest with Poetry..."
                 poetry run pytest \
-                  --junitxml="$REPORT_DIR/report.xml" \
-                  --html="$REPORT_DIR/report.html" \
+                  --junitxml="reports/${BUILD_NUMBER}_feather/report.xml" \
+                  --html="reports/${BUILD_NUMBER}_feather/report.html" \
                   --self-contained-html
                 '''
             }
-            post {
-                always {
-                    junit 'reports/**/report.xml'
-                    publishHTML([
-                        reportDir: 'reports',
-                        reportFiles: '**/report.html',
-                        reportName: 'Pytest HTML Report'
-                    ])
-                }
-            }
+        }
+    }
+
+    post {
+        always {
+            junit 'reports/**/report.xml'
+            publishHTML([
+                allowMissing: false,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: 'reports',
+                reportFiles: '**/report.html',
+                reportName: 'Pytest HTML Report'
+            ])
         }
     }
 }
