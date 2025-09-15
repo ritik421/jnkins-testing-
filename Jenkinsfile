@@ -1,6 +1,11 @@
 pipeline {
     agent { label 'Worker-1' }
 
+    options {
+        // Prevent multiple builds from piling up, keep only the latest
+        disableConcurrentBuilds(abortPrevious: true)
+    }
+
     stages {
         stage('Checkout Jenkinsfile Repo') {
             steps {
