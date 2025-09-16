@@ -2,7 +2,7 @@ pipeline {
     agent { label 'Worker-1' }
 
     options {
-        // Prevent multiple builds from piling up, keep only the latest
+        // Prevent multiple builds piling up, keep only the latest
         disableConcurrentBuilds(abortPrevious: true)
     }
 
@@ -56,10 +56,13 @@ pipeline {
                 sh '''#!/bin/bash
                 set -euo pipefail
                 cd ${WORKSPACE}
-                export PYTHONPATH="${PYTHONPATH:-}:.:$(pwd)/nexus"
-                export DJANGO_SETTINGS_MODULE=nexus.settings
 
-                poetry run pytest \
+                # Explicitly tell Django where settings are + add root to PYTHONPATH
+                export DJANGO_SETTINGS_MODULE=nexus.settings
+                export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+
+                poetry run pytest nexus/ \
+                  --tb=short -v \
                   --junitxml="reports/${BUILD_NUMBER}_feather/report.xml" \
                   --html="reports/${BUILD_NUMBER}_feather/report.html" \
                   --self-contained-html
@@ -82,3 +85,4 @@ pipeline {
         }
     }
 }
+
