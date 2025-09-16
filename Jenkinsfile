@@ -2,7 +2,7 @@ pipeline {
     agent { label 'Worker-1' }
 
     options {
-        // Prevent multiple builds piling up, keep only the latest
+        // Prevent multiple builds from piling up, keep only the latest
         disableConcurrentBuilds(abortPrevious: true)
     }
 
@@ -56,9 +56,10 @@ pipeline {
                 sh '''#!/bin/bash
                 set -euo pipefail
                 cd ${WORKSPACE}
+                export PYTHONPATH="${PYTHONPATH:-}:.:$(pwd)/nexus"
+                export DJANGO_SETTINGS_MODULE=nexus.settings
 
-                # Let pytest-django handle Django setup via pytest.ini
-                poetry run pytest --tb=short -v \
+                poetry run pytest \
                   --junitxml="reports/${BUILD_NUMBER}_feather/report.xml" \
                   --html="reports/${BUILD_NUMBER}_feather/report.html" \
                   --self-contained-html
@@ -81,4 +82,3 @@ pipeline {
         }
     }
 }
-
