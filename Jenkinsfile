@@ -2,15 +2,15 @@ pipeline {
     agent { label 'Worker-1' }
 
     options {
+        // Prevent multiple builds from piling up
         disableConcurrentBuilds(abortPrevious: true)
     }
 
     parameters {
         choice(
             name: 'BRANCH_NAME',
-            choices: ['bpt/stage', 'bpt/master'],
-            description: 'Choose branch to run tests on (default is bpt/stage)',
-            defaultValue: 'bpt/stage'
+            choices: ['bpt/stage', 'bpt/master'], // first one = default
+            description: 'Choose branch to run tests on'
         )
     }
 
@@ -18,8 +18,7 @@ pipeline {
         stage('Select Branch') {
             steps {
                 script {
-                    // Default branch handling
-                    env.BRANCH_NAME = params.BRANCH_NAME ?: 'bpt/stage'
+                    env.BRANCH_NAME = params.BRANCH_NAME
 
                     // Restrict only to stage/master
                     if (!(env.BRANCH_NAME in ['bpt/stage', 'bpt/master'])) {
@@ -50,8 +49,7 @@ pipeline {
                 export PATH="$HOME/.local/bin:$PATH"
 
                 # Install dependencies
-                poetry lock
-                poetry install
+                poetry install --no-root
 
                 # Setup secrets
                 sudo gcloud secrets versions access latest \
