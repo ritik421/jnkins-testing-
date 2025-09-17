@@ -37,15 +37,13 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    // Run tests, catch exit code
-                    def exitCode = sh(
-                        script: '''
-                            #!/bin/bash
+                    try {
+                        sh """#!/bin/bash
                             set -euo pipefail
 
                             # Pre-step
                             sudo bash /home/vikas/py.sh
-                            export PATH="$HOME/.local/bin:$PATH"
+                            export PATH="\$HOME/.local/bin:\$PATH"
                             cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
 
                             # Install deps
@@ -60,22 +58,28 @@ pipeline {
                             sudo cp /home/vikas/.test/firebase_credentials.json nexus/
 
                             # Reports dir
-                            REPORT_DIR="reports/${BUILD_NUMBER}_feather"
-                            mkdir -p "$REPORT_DIR"
+                            REPORT_DIR="reports/\${BUILD_NUMBER}_feather"
+                            mkdir -p "\$REPORT_DIR"
 
-                            # Run pytest
+                            # Run pytest (allow failures)
+                            set +e
                             poetry run pytest nexus/ --tb=short -v \
-                              --junitxml="$REPORT_DIR/report.xml" \
-                              --html="$REPORT_DIR/report.html" \
+                              --junitxml="\$REPORT_DIR/report.xml" \
+                              --html="\$REPORT_DIR/report.html" \
                               --self-contained-html
-                        ''',
-                        returnStatus: true,
-                        interpreter: '/bin/bash'
-                    )
+                            exitCode=\$?
+                            set -e
 
-                    if (exitCode != 0) {
-                        echo "⚠️ Tests failed → marking build as UNSTABLE."
-                        currentBuild.result = 'UNSTABLE'
+                            exit \$exitCode
+                        """
+                    } catch (err) {
+                        if (currentBuild.result == null || currentBuild.result == 'SUCCESS') {
+                            echo "⚠️ Pytest failures → marking build as UNSTABLE."
+                            currentBuild.result = 'UNSTABLE'
+                        } else {
+                            echo "❌ Infra/setup error → failing pipeline."
+                            throw err
+                        }
                     }
                 }
             }
