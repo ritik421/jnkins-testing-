@@ -2,15 +2,14 @@ pipeline {
     agent { label 'Worker-1' }
 
     options {
-        // Prevent multiple builds from piling up
         disableConcurrentBuilds(abortPrevious: true)
     }
 
     parameters {
         choice(
             name: 'BRANCH_NAME',
-            choices: ['bpt/stage', 'bpt/master'], // first one = default
-            description: 'Choose branch to run tests on'
+            choices: ['bpt/stage', 'bpt/master'],
+            description: 'Choose branch to run tests on (default is bpt/stage)'
         )
     }
 
@@ -18,12 +17,10 @@ pipeline {
         stage('Select Branch') {
             steps {
                 script {
-                    env.BRANCH_NAME = params.BRANCH_NAME
-
+                    env.BRANCH_NAME = params.BRANCH_NAME ?: 'bpt/stage'
                     if (!(env.BRANCH_NAME in ['bpt/stage', 'bpt/master'])) {
-                        error "❌ Build skipped. Only allowed on bpt/stage or bpt/master, got ${env.BRANCH_NAME}"
+                        error "❌ Only bpt/stage or bpt/master are allowed, got ${env.BRANCH_NAME}"
                     }
-
                     echo "⚡ Final branch to run pipeline: ${env.BRANCH_NAME}"
                 }
             }
@@ -40,43 +37,45 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    // Run pytest and capture exit code instead of failing immediately
-                    def exitCode = sh(script: '''
-                        #!/bin/bash
-                        set -euo pipefail
+                    // Run tests, catch exit code
+                    def exitCode = sh(
+                        script: '''
+                            #!/bin/bash
+                            set -euo pipefail
 
-                        sudo bash /home/vikas/py.sh
-                        export PATH="$HOME/.local/bin:$PATH"
-                        cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
+                            # Pre-step
+                            sudo bash /home/vikas/py.sh
+                            export PATH="$HOME/.local/bin:$PATH"
+                            cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
 
-                        # Install dependencies
-                        poetry lock
-                        poetry install
+                            # Install deps
+                            poetry lock
+                            poetry install
+                            poetry run pip install pytest-html
 
-                        # Ensure pytest-html is installed
-                        poetry run pip install pytest-html
+                            # Secrets
+                            sudo gcloud secrets versions access latest \
+                              --secret=beam-qa-test \
+                              --project=aai-network-test > nexus/.env
+                            sudo cp /home/vikas/.test/firebase_credentials.json nexus/
 
-                        # Setup secrets
-                        sudo gcloud secrets versions access latest \
-                          --secret=beam-qa-test \
-                          --project=aai-network-test > nexus/.env
-                        sudo cp /home/vikas/.test/firebase_credentials.json nexus/
+                            # Reports dir
+                            REPORT_DIR="reports/${BUILD_NUMBER}_feather"
+                            mkdir -p "$REPORT_DIR"
 
-                        # Reports
-                        REPORT_DIR="reports/${BUILD_NUMBER}_feather"
-                        mkdir -p "$REPORT_DIR"
+                            # Run pytest
+                            poetry run pytest nexus/ --tb=short -v \
+                              --junitxml="$REPORT_DIR/report.xml" \
+                              --html="$REPORT_DIR/report.html" \
+                              --self-contained-html
+                        ''',
+                        returnStatus: true,
+                        interpreter: '/bin/bash'
+                    )
 
-                        # Run pytest
-                        poetry run pytest nexus/ --tb=short -v \
-                          --junitxml="$REPORT_DIR/report.xml" \
-                          --html="$REPORT_DIR/report.html" \
-                          --self-contained-html
-                        ''', returnStatus: true)
-
-                    // Mark build as unstable if tests failed
                     if (exitCode != 0) {
+                        echo "⚠️ Tests failed → marking build as UNSTABLE."
                         currentBuild.result = 'UNSTABLE'
-                        echo "⚠️ Tests failed. Marking build as UNSTABLE."
                     }
                 }
             }
@@ -85,10 +84,7 @@ pipeline {
 
     post {
         always {
-            // ✅ Collect JUnit XML results
             junit 'reports/**/report.xml'
-
-            // ✅ Publish Pytest HTML report
             publishHTML([
                 allowMissing: false,
                 alwaysLinkToLastBuild: true,
@@ -97,6 +93,18 @@ pipeline {
                 reportFiles: '**/report.html',
                 reportName: 'Pytest HTML Report'
             ])
+        }
+
+        failure {
+            echo "❌ Pipeline failed due to infra/setup issue."
+        }
+
+        unstable {
+            echo "⚠️ Pipeline unstable (test failures)."
+        }
+
+        success {
+            echo "✅ Pipeline succeeded!"
         }
     }
 }
