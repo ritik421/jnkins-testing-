@@ -39,7 +39,7 @@ pipeline {
                 script {
                     try {
                         sh """#!/bin/bash
-                            set -euo pipefail
+                            set -e
 
                             # Pre-step
                             sudo bash /home/vikas/py.sh
@@ -61,7 +61,7 @@ pipeline {
                             REPORT_DIR="reports/\${BUILD_NUMBER}_feather"
                             mkdir -p "\$REPORT_DIR"
 
-                            # Run pytest (allow failures)
+                            # Run pytest (capture exit code without failing pipeline)
                             set +e
                             poetry run pytest nexus/ --tb=short -v \
                               --junitxml="\$REPORT_DIR/report.xml" \
@@ -73,8 +73,9 @@ pipeline {
                             exit \$exitCode
                         """
                     } catch (err) {
+                        // Distinguish between infra error and test failures
                         if (currentBuild.result == null || currentBuild.result == 'SUCCESS') {
-                            echo "⚠️ Pytest failures → marking build as UNSTABLE."
+                            echo "⚠️ BUILD SUCCESS at runtime, but tests failed → marking build as UNSTABLE."
                             currentBuild.result = 'UNSTABLE'
                         } else {
                             echo "❌ Infra/setup error → failing pipeline."
@@ -95,20 +96,22 @@ pipeline {
                 keepAll: true,
                 reportDir: 'reports',
                 reportFiles: '**/report.html',
-                reportName: 'Pytest HTML Report'
+                reportName: 'Pytest HTML Report',
+                reportTitles: 'Test Results',
+                useWrapperFileDirectly: true   // 👈 makes HTML report the landing page
             ])
         }
 
         failure {
-            echo "❌ Pipeline failed due to infra/setup issue."
+            echo "❌ Pipeline FAILED (infra/setup issue)."
         }
 
         unstable {
-            echo "⚠️ Pipeline unstable (test failures)."
+            echo "⚠️ Pipeline UNSTABLE (tests failed)."
         }
 
         success {
-            echo "✅ Pipeline succeeded!"
+            echo "✅ Pipeline SUCCESS (tests passed)."
         }
     }
 }
