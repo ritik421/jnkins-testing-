@@ -2,38 +2,40 @@ pipeline {
     agent { label 'Worker-1' }
 
     options {
-        // Prevent multiple builds from piling up, keep only the latest
         disableConcurrentBuilds(abortPrevious: true)
-        // Show timestamps in logs
-        timestamps()
+    }
+
+    parameters {
+        choice(
+            name: 'BRANCH_NAME',
+            choices: ['bpt/stage', 'bpt/master'],
+            description: 'Choose branch to run tests on (default is bpt/stage)',
+            defaultValue: 'bpt/stage'
+        )
     }
 
     stages {
-        stage('Setup Environment') {
+        stage('Select Branch') {
             steps {
-                sh '''#!/bin/bash
-                set -euo pipefail
+                script {
+                    // Default branch handling
+                    env.BRANCH_NAME = params.BRANCH_NAME ?: 'bpt/stage'
 
-                # Run your Python setup script (this ensures correct Python version)
-                sudo bash /home/vikas/py.sh
+                    // Restrict only to stage/master
+                    if (!(env.BRANCH_NAME in ['bpt/stage', 'bpt/master'])) {
+                        error "❌ Build skipped. Only allowed on bpt/stage or bpt/master, got ${env.BRANCH_NAME}"
+                    }
 
-                # Ensure poetry is in PATH
-                export PATH="$HOME/.local/bin:$PATH"
+                    echo "⚡ Final branch to run pipeline: ${env.BRANCH_NAME}"
+                }
+            }
+        }
 
-                cd /home/vikas/workspace/QA-Scripts/jnkins-test
-
-                # Install dependencies
-                poetry lock
-                poetry install
-
-                # Fetch secrets
-                sudo gcloud secrets versions access latest \
-                  --secret=beam-qa-test \
-                  --project=aai-network-test > nexus/.env
-
-                # Copy Firebase credentials
-                sudo cp /home/vikas/.test/firebase_credentials.json nexus/
-                '''
+        stage('Checkout Feathers Repo') {
+            steps {
+                git branch: "${env.BRANCH_NAME}",
+                    url: 'https://github.com/attentive-fx/feathers',
+                    credentialsId: 'd8025270-629b-4058-8293-9b8d4cc40022'
             }
         }
 
@@ -41,14 +43,27 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                 set -euo pipefail
-                cd /home/vikas/workspace/QA-Scripts/jnkins-test
+                cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
 
+                # Pre-step
+                sudo bash /home/vikas/py.sh
+                export PATH="$HOME/.local/bin:$PATH"
+
+                # Install dependencies
+                poetry lock
+                poetry install
+
+                # Setup secrets
+                sudo gcloud secrets versions access latest \
+                  --secret=beam-qa-test \
+                  --project=aai-network-test > nexus/.env
+                sudo cp /home/vikas/.test/firebase_credentials.json nexus/
+
+                # Reports
                 REPORT_DIR="reports/${BUILD_NUMBER}_feather"
                 mkdir -p "$REPORT_DIR"
 
-                # Run pytest with XML + HTML reports
-                poetry run pytest nexus/ \
-                  --tb=short -v \
+                poetry run pytest nexus/ --tb=short -v \
                   --junitxml="$REPORT_DIR/report.xml" \
                   --html="$REPORT_DIR/report.html" \
                   --self-contained-html
@@ -59,10 +74,7 @@ pipeline {
 
     post {
         always {
-            // Publish JUnit XML results
             junit 'reports/**/report.xml'
-
-            // Publish HTML report
             publishHTML([
                 allowMissing: false,
                 alwaysLinkToLastBuild: true,
