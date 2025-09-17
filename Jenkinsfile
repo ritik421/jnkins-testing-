@@ -20,7 +20,6 @@ pipeline {
                 script {
                     env.BRANCH_NAME = params.BRANCH_NAME
 
-                    // Restrict only to stage/master
                     if (!(env.BRANCH_NAME in ['bpt/stage', 'bpt/master'])) {
                         error "❌ Build skipped. Only allowed on bpt/stage or bpt/master, got ${env.BRANCH_NAME}"
                     }
@@ -42,14 +41,17 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                 set -euo pipefail
-                cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
 
-                # Pre-step
                 sudo bash /home/vikas/py.sh
                 export PATH="$HOME/.local/bin:$PATH"
+                cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
 
                 # Install dependencies
-                poetry install --no-root
+                poetry lock
+                poetry install
+
+                # ✅ Ensure pytest-html is installed every time
+                poetry run pip install pytest-html
 
                 # Setup secrets
                 sudo gcloud secrets versions access latest \
@@ -72,7 +74,10 @@ pipeline {
 
     post {
         always {
+            // ✅ Collect JUnit XML results
             junit 'reports/**/report.xml'
+
+            // ✅ Publish Pytest HTML report
             publishHTML([
                 allowMissing: false,
                 alwaysLinkToLastBuild: true,
