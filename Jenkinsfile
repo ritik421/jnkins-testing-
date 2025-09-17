@@ -39,35 +39,46 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                sh '''#!/bin/bash
-                set -euo pipefail
+                script {
+                    // Run pytest and capture exit code instead of failing immediately
+                    def exitCode = sh(script: '''
+                        #!/bin/bash
+                        set -euo pipefail
 
-                sudo bash /home/vikas/py.sh
-                export PATH="$HOME/.local/bin:$PATH"
-                cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
+                        sudo bash /home/vikas/py.sh
+                        export PATH="$HOME/.local/bin:$PATH"
+                        cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
 
-                # Install dependencies
-                poetry lock
-                poetry install
+                        # Install dependencies
+                        poetry lock
+                        poetry install
 
-                # ✅ Ensure pytest-html is installed every time
-                poetry run pip install pytest-html
+                        # Ensure pytest-html is installed
+                        poetry run pip install pytest-html
 
-                # Setup secrets
-                sudo gcloud secrets versions access latest \
-                  --secret=beam-qa-test \
-                  --project=aai-network-test > nexus/.env
-                sudo cp /home/vikas/.test/firebase_credentials.json nexus/
+                        # Setup secrets
+                        sudo gcloud secrets versions access latest \
+                          --secret=beam-qa-test \
+                          --project=aai-network-test > nexus/.env
+                        sudo cp /home/vikas/.test/firebase_credentials.json nexus/
 
-                # Reports
-                REPORT_DIR="reports/${BUILD_NUMBER}_feather"
-                mkdir -p "$REPORT_DIR"
+                        # Reports
+                        REPORT_DIR="reports/${BUILD_NUMBER}_feather"
+                        mkdir -p "$REPORT_DIR"
 
-                poetry run pytest nexus/ --tb=short -v \
-                  --junitxml="$REPORT_DIR/report.xml" \
-                  --html="$REPORT_DIR/report.html" \
-                  --self-contained-html
-                '''
+                        # Run pytest
+                        poetry run pytest nexus/ --tb=short -v \
+                          --junitxml="$REPORT_DIR/report.xml" \
+                          --html="$REPORT_DIR/report.html" \
+                          --self-contained-html
+                        ''', returnStatus: true)
+
+                    // Mark build as unstable if tests failed
+                    if (exitCode != 0) {
+                        currentBuild.result = 'UNSTABLE'
+                        echo "⚠️ Tests failed. Marking build as UNSTABLE."
+                    }
+                }
             }
         }
     }
