@@ -18,9 +18,11 @@ pipeline {
             steps {
                 script {
                     env.BRANCH_NAME = params.BRANCH_NAME ?: 'bpt/stage'
+
                     if (!(env.BRANCH_NAME in ['bpt/stage', 'bpt/master'])) {
-                        error "❌ Only bpt/stage or bpt/master are allowed, got ${env.BRANCH_NAME}"
+                        error "❌ Build skipped. Only allowed on bpt/stage or bpt/master, got ${env.BRANCH_NAME}"
                     }
+
                     echo "⚡ Final branch to run pipeline: ${env.BRANCH_NAME}"
                 }
             }
@@ -38,49 +40,40 @@ pipeline {
             steps {
                 script {
                     try {
-                        sh """#!/bin/bash
-                            set -e
+                        sh '''#!/bin/bash
+                        set -eu
+                        cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
 
-                            # Pre-step
-                            sudo bash /home/vikas/py.sh
-                            export PATH="\$HOME/.local/bin:\$PATH"
-                            cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
+                        # Pre-step
+                        sudo bash /home/vikas/py.sh
+                        export PATH="$HOME/.local/bin:$PATH"
 
-                            # Install deps
-                            poetry lock
-                            poetry install
-                            poetry run pip install pytest-html
+                        # Install dependencies
+                        poetry lock
+                        poetry install
 
-                            # Secrets
-                            sudo gcloud secrets versions access latest \
-                              --secret=beam-qa-test \
-                              --project=aai-network-test > nexus/.env
-                            sudo cp /home/vikas/.test/firebase_credentials.json nexus/
+                        # Ensure pytest-html exists (permanent)
+                        poetry run pip install --quiet pytest-html
 
-                            # Reports dir
-                            REPORT_DIR="reports/\${BUILD_NUMBER}_feather"
-                            mkdir -p "\$REPORT_DIR"
+                        # Setup secrets
+                        sudo gcloud secrets versions access latest \
+                          --secret=beam-qa-test \
+                          --project=aai-network-test > nexus/.env
+                        sudo cp /home/vikas/.test/firebase_credentials.json nexus/
 
-                            # Run pytest (capture exit code without failing pipeline)
-                            set +e
-                            poetry run pytest nexus/ --tb=short -v \
-                              --junitxml="\$REPORT_DIR/report.xml" \
-                              --html="\$REPORT_DIR/report.html" \
-                              --self-contained-html
-                            exitCode=\$?
-                            set -e
+                        # Reports dir
+                        REPORT_DIR="reports/${BUILD_NUMBER}_feather"
+                        mkdir -p "$REPORT_DIR"
 
-                            exit \$exitCode
-                        """
-                    } catch (err) {
-                        // Distinguish between infra error and test failures
-                        if (currentBuild.result == null || currentBuild.result == 'SUCCESS') {
-                            echo "⚠️ BUILD SUCCESS at runtime, but tests failed → marking build as UNSTABLE."
-                            currentBuild.result = 'UNSTABLE'
-                        } else {
-                            echo "❌ Infra/setup error → failing pipeline."
-                            throw err
-                        }
+                        # Run tests
+                        poetry run pytest nexus/ --tb=short -v \
+                          --junitxml="$REPORT_DIR/report.xml" \
+                          --html="$REPORT_DIR/report.html" \
+                          --self-contained-html
+                        '''
+                    } catch (Exception e) {
+                        echo "⚠️ Tests failed → marking build as UNSTABLE."
+                        currentBuild.result = 'UNSTABLE'
                     }
                 }
             }
@@ -89,29 +82,28 @@ pipeline {
 
     post {
         always {
+            // Collect XML results
             junit 'reports/**/report.xml'
+
+            // Publish HTML for this build
             publishHTML([
                 allowMissing: false,
                 alwaysLinkToLastBuild: true,
                 keepAll: true,
-                reportDir: 'reports',
-                reportFiles: '**/report.html',
-                reportName: 'Pytest HTML Report',
-                reportTitles: 'Test Results',
-                useWrapperFileDirectly: true   // 👈 makes HTML report the landing page
+                reportDir: "reports/${BUILD_NUMBER}_feather",
+                reportFiles: 'report.html',
+                reportName: "Pytest HTML Report"
             ])
-        }
 
-        failure {
-            echo "❌ Pipeline FAILED (infra/setup issue)."
-        }
-
-        unstable {
-            echo "⚠️ Pipeline UNSTABLE (tests failed)."
-        }
-
-        success {
-            echo "✅ Pipeline SUCCESS (tests passed)."
+            script {
+                if (currentBuild.result == 'SUCCESS') {
+                    echo "✅ Build Success → Reports published."
+                } else if (currentBuild.result == 'UNSTABLE') {
+                    echo "⚠️ Build Unstable (tests failed) → Reports published."
+                } else {
+                    echo "❌ Build Failed → Reports may be incomplete."
+                }
+            }
         }
     }
 }
