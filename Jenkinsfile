@@ -61,8 +61,8 @@ pipeline {
                           --project=aai-network-test > nexus/.env
                         sudo cp /home/vikas/.test/firebase_credentials.json nexus/
 
-                        # Reports dir
-                        REPORT_DIR="reports/${BUILD_NUMBER}_feather"
+                        # Reports dir inside Jenkins job workspace
+                        REPORT_DIR="$WORKSPACE/reports/${BUILD_NUMBER}_feather"
                         mkdir -p "$REPORT_DIR"
 
                         # Run tests
