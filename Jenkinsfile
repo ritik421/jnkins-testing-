@@ -3,14 +3,16 @@ pipeline {
 
     options {
         disableConcurrentBuilds(abortPrevious: true)
+        timestamps()
     }
 
     parameters {
-        choice(
-            name: 'BRANCH_NAME',
-            choices: ['bpt/stage', 'bpt/master'],
-            description: 'Choose branch to run tests on (default is bpt/stage)'
-        )
+        choice(name: 'BRANCH_NAME', choices: ['bpt/stage', 'bpt/master'], description: 'Choose branch to run tests on (default: bpt/stage)')
+    }
+
+    environment {
+        REPO_URL = 'https://github.com/attentive-fx/feathers'
+        CREDENTIALS_ID = 'd8025270-629b-4058-8293-9b8d4cc40022'
     }
 
     stages {
@@ -28,18 +30,16 @@ pipeline {
             }
         }
 
-        stage('Checkout Feathers Repo') {
+        stage('Checkout') {
             steps {
-                git branch: "${env.BRANCH_NAME}",
-                    url: 'https://github.com/attentive-fx/feathers',
-                    credentialsId: 'd8025270-629b-4058-8293-9b8d4cc40022'
+                git branch: "${env.BRANCH_NAME}", url: "${env.REPO_URL}", credentialsId: "${env.CREDENTIALS_ID}"
             }
         }
 
         stage('Run Tests') {
             steps {
                 script {
-                    try {
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
                         sh '''#!/bin/bash
                         set -eu
                         cd /home/vikas/workspace/Test-Cases/Test-Cases-Execution
@@ -71,9 +71,6 @@ pipeline {
                           --html="$REPORT_DIR/report.html" \
                           --self-contained-html
                         '''
-                    } catch (Exception e) {
-                        echo "⚠️ Tests failed → marking build as UNSTABLE."
-                        currentBuild.result = 'UNSTABLE'
                     }
                 }
             }
@@ -82,28 +79,18 @@ pipeline {
 
     post {
         always {
-            // Collect XML results
+            echo "Collecting test reports and publishing to the UI..."
+
             junit 'reports/**/report.xml'
 
-            // Publish HTML for this build
             publishHTML([
                 allowMissing: false,
                 alwaysLinkToLastBuild: true,
                 keepAll: true,
-                reportDir: "reports/${BUILD_NUMBER}_feather",
+                reportDir: "reports/${env.BUILD_NUMBER}_feather",
                 reportFiles: 'report.html',
-                reportName: "Pytest HTML Report"
+                reportName: 'Pytest HTML Report'
             ])
-
-            script {
-                if (currentBuild.result == 'SUCCESS') {
-                    echo "✅ Build Success → Reports published."
-                } else if (currentBuild.result == 'UNSTABLE') {
-                    echo "⚠️ Build Unstable (tests failed) → Reports published."
-                } else {
-                    echo "❌ Build Failed → Reports may be incomplete."
-                }
-            }
         }
     }
 }
